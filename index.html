@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Terminal</title>
+<style>
+#terminal{
+	position: fixed;
+	left: 0;
+	top: 0;
+	right: 0;
+	bottom: 0;
+	width: auto;
+	height: auto;
+	overflow-y: scroll;
+	background: #000;
+	color: white;
+	font-family: monospace;
+	font-size: 11pt;
+	white-space: pre-wrap;
+	word-break: break-all;
+	--basic-color0: #000000;
+	--basic-color1: #ff0000;
+	--basic-color2: #00ff00;
+	--basic-color3: #ffff00;
+	--basic-color4: #0000ff;
+	--basic-color5: #ff00ff;
+	--basic-color6: #00ffff;
+	--basic-color7: #ffffff;
+}
+#terminal [contenteditable="plaintext-only"]{
+	outline-width: 0;
+}
+#terminal [contenteditable="plaintext-only"][data-pre]::before{
+	content: attr(data-pre);
+}
+#terminal .esc::before{
+	content: "^";
+}
+#terminal [data-tc="0"]{ color: var(--basic-color0); }
+#terminal [data-tc="1"]{ color: var(--basic-color1); }
+#terminal [data-tc="2"]{ color: var(--basic-color2); }
+#terminal [data-tc="3"]{ color: var(--basic-color3); }
+#terminal [data-tc="4"]{ color: var(--basic-color4); }
+#terminal [data-tc="5"]{ color: var(--basic-color5); }
+#terminal [data-tc="6"]{ color: var(--basic-color6); }
+#terminal [data-tc="7"]{ color: var(--basic-color7); }
+#terminal [data-trgb]{ color: attr(data-trgb type(<color>)); }
+#terminal [data-bc="0"]{ background: var(--basic-color0); }
+#terminal [data-bc="1"]{ background: var(--basic-color1); }
+#terminal [data-bc="2"]{ background: var(--basic-color2); }
+#terminal [data-bc="3"]{ background: var(--basic-color3); }
+#terminal [data-bc="4"]{ background: var(--basic-color4); }
+#terminal [data-bc="5"]{ background: var(--basic-color5); }
+#terminal [data-bc="6"]{ background: var(--basic-color6); }
+#terminal [data-bc="7"]{ background: var(--basic-color7); }
+#terminal [data-brgb]{ background: attr(data-brgb type(<color>)); }
+</style>
+</head>
+<body>
+<main id="terminal"><span tabindex="0" contenteditable="plaintext-only" autocorrect="off" spellcheck="false" data-pre="&gt;"></span></main>
+<script type="text/javascript" src="Runtime.js"></script>
+<script type="text/javascript">
+document.addEventListener("DOMContentLoaded", function(){
+const process = {
+	input(inputStr, preStr = ""){
+		if(this.ctx.echo){
+			const escStr = this.escStr;
+			new Blob([preStr].concat(Array.from(inputStr, ch => {
+				const code = ch.charCodeAt(0);
+				if(code < escStr.length){
+					return "^" + escStr.charAt(code);
+				}
+				return ch;
+			}), ["\n"])).stream().pipeTo(this.getOutputStream());
+		}
+		const process = Runtime.exec(inputStr, this.environments, this.cd);
+		process.getInputStream().pipeTo(this.getOutputStream());
+		process.getErrorStream().pipeTo(this.getOutputStream());
+		 this.getInputStream().pipeTo(process.getOutputStream());
+		return process.waitFor().finally(() => {
+			const ise = this.terminal.querySelector('[contenteditable="plaintext-only"]');
+			if(ise != null){
+				ise.hidden = true;
+				ise.innerHTML = '<span contenteditable="false" class="esc">Z</span>';
+				ise.dispatchEvent(new KeyboardEvent("keydown", {key: "Enter"}));
+			}
+			this.environments = process.environments;
+			this.cd = process.currentDirectory;
+			if(process.exitValue == 0){
+				return Promise.resolve(process.exitValue);
+			}
+			return Promise.reject(process.exitValue);
+		});
+	},
+	getOutputStream(){
+		return new WritableStream({
+			write(chunk, controller){
+				const byteArray = new Uint8Array(chunk);
+				const ansiTC = ["30m", "31m", "32m", "33m", "34m", "35m", "36m", "37m"];
+				const ansiBC = ["40m", "41m", "42m", "43m", "44m", "45m", "46m", "47m"];
+				const it = {
+					*[Symbol.iterator](){
+						const byteArray = this.byteArray;
+						const n = this.zeroList.length;
+						let current = 0;
+						for(let i = 0; i < n; i++){
+							const item = this.zeroList[i];
+							if(item == null){
+								const length = byteArray.byteLength - current;
+								if(length > 0){
+									yield new Uint8Array(byteArray.buffer, byteArray.byteOffset + current, length);
+								}
+								continue;
+							}
+							const length = item - current;
+							if(length > 0){
+								yield new Uint8Array(byteArray.buffer, byteArray.byteOffset + current, length);
+							}
+							yield null;
+							current = item + 1;
+						}
+					},
+					zeroList: [],
+					byteArray: byteArray
+				};
+				for(let pos = byteArray.indexOf(0); pos >= 0; pos = byteArray.indexOf(0, pos + 1)){
+					it.zeroList.push(pos);
+				}
+				it.zeroList.push(null);
+				for(let data of it){
+					if(data == null){
+						const ne = document.createElement("span");
+						ne.classList.add("null");
+						this.terminal.append(ne);
+						continue;
+					}
+					const it2 = {
+						*[Symbol.iterator](){
+							const matches = this.str.matchAll(/(?:(?:\x9B|\x1B\[)[0-?]*[ -\/]*[@-~])+/g);
+							let current = 0;
+							for(let match of matches){
+								const escData = {
+									index: match.index,
+									length: match.at(0).length,
+									items: match.at(0).split(/\x9B|\x1B\[/).slice(1)
+								};
+								if(current < escData.index){
+									yield this.str.slice(current, escData.index);
+								}
+								current = escData.index + escData.length
+								yield escData.items;
+							}
+							const str = this.str.slice(current);
+							if(str != ""){
+								yield str;
+							}
+						},
+						str: this.decoder.decode(data)
+					}
+					for(let token of it2){
+						if(Array.isArray(token)){
+							for(let esc of token){
+								if(esc == "2J"){
+									this.terminal.innerHTML = "";
+									continue;
+								}
+								if(esc == "0m"){
+									this.ctx.textColor = null;
+									this.ctx.backgroundColor = null;
+									continue;
+								}
+								if(esc == "7m"){
+									const {textColor, backgroundColor} = this.ctx;
+									this.ctx.textColor = backgroundColor;
+									this.ctx.backgroundColor = textColor;
+									continue;
+								}
+								if(ansiTC.includes(esc)){
+									this.ctx.textColor = {attr: "c", value: esc.slice(1, -1)};
+									continue;
+								}
+								if(esc.startsWith("38;2;")){
+									this.ctx.textColor = {attr: "rgb", value: "#" + esc.slice(5, -1).split(";").map(v => Number(v).toString(16).padStart(2, "0")).join("")};
+									continue;
+								}
+								if(esc.startsWith("38;5;")){
+									this.ctx.textColor = {attr: "i", value: esc.slice(5, -1)};
+									continue;
+								}
+								if(esc == "39m"){
+									this.ctx.textColor = null;
+									continue;
+								}
+								if(ansiBC.includes(esc)){
+									this.ctx.backgroundColor = {attr: "c", value: esc.slice(1, -1)};
+									continue;
+								}
+								if(esc.startsWith("48;2;")){
+									this.ctx.backgroundColor = {attr: "rgb", value:  "#" + esc.slice(5, -1).split(";").map(v => Number(v).toString(16).padStart(2, "0")).join("")};
+									continue;
+								}
+								if(esc.startsWith("48;5;")){
+									this.ctx.backgroundColor = {attr: "i", value: esc.slice(5, -1)};
+									continue;
+								}
+								if(esc == "49m"){
+									this.ctx.backgroundColor = null;
+									continue;
+								}
+							}
+							continue;
+						}
+						const str = token;
+						const span = document.createElement("span");
+						let plain = true;
+						span.textContent = str;
+						if(this.ctx.textColor != null){
+							plain = false;
+							span.setAttribute("data-t" + this.ctx.textColor.attr, this.ctx.textColor.value);
+						}
+						if(this.ctx.backgroundColor != null){
+							plain = false;
+							span.setAttribute("data-b" + this.ctx.backgroundColor.attr, this.ctx.backgroundColor.value);
+						}
+						this.terminal.append(plain ? span.textContent : span);
+					}
+				}
+				const ise = this.terminal.querySelector('[contenteditable="plaintext-only"]');
+				if(ise != null){
+					this.terminal.append(ise);
+					ise.focus();
+				}
+			},
+			terminal: this.terminal,
+			decoder: this.textDecoder,
+			ctx: this.ctx
+		});
+	},
+	getInputStream(){
+		return new ReadableStream({
+			handleEvent(e){
+				if(e.key == "Enter"){
+					e.preventDefault();
+					Array.from(this.input.querySelectorAll('.esc')).forEach(esc => {
+						const ch = this.escStr.indexOf(esc.textContent);
+						if(ch > 0){
+							esc.textContent = String.fromCharCode(ch);
+						}
+					});
+					const textData = this.input.textContent;
+					const pos = textData.indexOf("\u001A");
+					if(pos >= 0){
+						if(!this.input.hidden){
+							const escStr = process.escStr;
+							new Blob(Array.from(textData.slice(0, pos + 1), ch => {
+								const code = ch.charCodeAt(0);
+								if(code < escStr.length){
+									return "^" + escStr.charAt(code);
+								}
+								return ch;
+							}).concat(["\n"])).stream().pipeTo(process.getOutputStream());
+						}
+						this.controller.enqueue(process.textEncoder.encode(textData.slice(0, pos)));
+						this.controller.close();
+						this.input.removeEventListener("keydown" , this);
+						this.input.parentNode.removeChild(this.input);
+						return;
+					}else{
+						const escStr = process.escStr;
+						new Blob(Array.from(textData, ch => {
+							const code = ch.charCodeAt(0);
+							if(code < escStr.length){
+								return "^" + escStr.charAt(code);
+							}
+							return ch;
+						}).concat(["\n"])).stream().pipeTo(process.getOutputStream());
+						this.controller.enqueue(process.textEncoder.encode(textData + "\n"));
+					}
+					this.input.textContent = "";
+					this.input.focus();
+					return;
+				}
+				if(e.ctrlKey && (this.escStr.indexOf(e.key.toUpperCase()) > 0)){
+					e.preventDefault();
+					const sel = getSelection();
+					if(sel.rangeCount != 0){
+						const range = sel.getRangeAt(0);
+						const span = document.createElement("span");
+						span.setAttribute("contenteditable", "false");
+						span.classList.add("esc");
+						span.textContent = e.key.toUpperCase();
+						range.deleteContents();
+						range.insertNode(span);
+						range.collapse(false);
+						sel.removeAllRanges();
+						sel.addRange(range);
+					}
+					return;
+				}
+			},
+			start(controller){
+				this.controller = controller;
+				this.input = document.createElement("span");
+				this.input.setAttribute("tabindex", "0");
+				this.input.setAttribute("contenteditable", "plaintext-only");
+				this.input.setAttribute("autocorrect", "off");
+				this.input.setAttribute("spellcheck", "false");
+				this.input.addEventListener("keydown" , this);
+				this.escStr = process.escStr;
+				process.terminal.append(this.input);
+				this.input.focus();
+			},
+			controller: null,
+			input: null,
+			escStr: null
+		});
+	},
+	textEncoder: new TextEncoder(),
+	textDecoder: new TextDecoder(),
+	ctx: {
+		echo: true,
+		textColor: null,
+		backgroundColor: null
+	},
+	cd: "/",
+	environments: {},
+	terminal:  document.getElementById("terminal"),
+	tempFiles: [],
+	get escStr(){
+		return "0ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_";
+	}
+};
+const terminal = process.terminal;
+const input = terminal.querySelector('[contenteditable="plaintext-only"]');
+const escStr = process.escStr;
+terminal.addEventListener("click", function(){
+	const range = document.createRange();
+	const sel = getSelection();
+	const ise = terminal.querySelector('[contenteditable="plaintext-only"]');
+	if(ise == null){
+		return;
+	}
+	range.selectNodeContents(ise);
+	range.collapse(false);
+	sel.removeAllRanges();
+	sel.addRange(range);
+});
+terminal.addEventListener("dragover", function(e){
+	e.preventDefault();
+});
+terminal.addEventListener("drop", function(e){
+	e.preventDefault();
+	const sel = getSelection();
+	if(sel.rangeCount != 0){
+		const node = Array.from(e.dataTransfer.files, file => URL.createObjectURL(file))
+		.reduce(function(a, b, i){
+			const span = document.createElement("span");
+			span.setAttribute("contenteditable", "false");
+			span.textContent = b;
+			process.tempFiles.push(b);
+			if(i > 0){
+				a.append(" ");
+			}
+			a.append(span);
+			return a;
+		}, document.createDocumentFragment());
+		const range = sel.getRangeAt(0);
+		const ise = terminal.querySelector('[contenteditable="plaintext-only"]');
+		if(ise == null){
+			return;
+		}
+		if((range.startContainer.parentNode.closest('[contenteditable="plaintext-only"]') == ise) && (range.endContainer.parentNode.closest('[contenteditable="plaintext-only"]') == ise)){
+			range.deleteContents();
+			range.insertNode(node);
+		}else{
+			range.selectNodeContents(ise);
+			range.collapse(false);
+			range.insertNode(node);
+		}
+		range.collapse(false);
+		sel.removeAllRanges();
+		sel.addRange(range);
+	}
+});
+input.addEventListener("keydown" , function(e){
+	if(e.key == "Enter"){
+		e.preventDefault();
+		Array.from(input.querySelectorAll('.esc')).forEach(esc => {
+			const ch = escStr.indexOf(esc.textContent);
+			if(ch > 0){
+				esc.textContent = String.fromCharCode(ch);
+			}
+		});
+		input.parentNode.removeChild(input);
+		process.input(input.textContent, input.getAttribute("data-pre")).finally(() => {
+			for(let i = process.tempFiles.length - 1; i >= 0; i--){
+				URL.revokeObjectURL(process.tempFiles.pop());
+			}
+			input.setAttribute("data-pre", process.cd.replace(/[\/]*$/, ">"));
+			terminal.append(input);
+			input.textContent = "";
+			input.focus();
+		});
+		return;
+	}
+	if(e.ctrlKey && (escStr.indexOf(e.key.toUpperCase()) > 0)){
+		e.preventDefault();
+		const sel = getSelection();
+		if(sel.rangeCount != 0){
+			const range = sel.getRangeAt(0);
+			const span = document.createElement("span");
+			span.setAttribute("contenteditable", "false");
+			span.classList.add("esc");
+			span.textContent = e.key.toUpperCase();
+			range.deleteContents();
+			range.insertNode(span);
+			range.collapse(false);
+			sel.removeAllRanges();
+			sel.addRange(range);
+		}
+		return;
+	}
+});
+terminal.addEventListener("contextmenu", function(e){
+	e.preventDefault();
+	navigator.clipboard.readText().then(text => {
+		const sel = getSelection();
+		if(sel.rangeCount != 0){
+			const node = document.createDocumentFragment();
+			const range = sel.getRangeAt(0);
+			const ise = terminal.querySelector('[contenteditable="plaintext-only"]');
+			if(ise == null){
+				return;
+			}
+			node.append(text);
+			if((range.startContainer.parentNode.closest('[contenteditable="plaintext-only"]') == ise) && (range.endContainer.parentNode.closest('[contenteditable="plaintext-only"]') == ise)){
+				range.deleteContents();
+				range.insertNode(node);
+			}else{
+				range.selectNodeContents(ise);
+				range.collapse(false);
+				range.insertNode(node);
+			}
+			range.collapse(false);
+			sel.removeAllRanges();
+			sel.addRange(range);
+		}
+	}, error => {});
+});
+});
+addEventListener("message", function(e){
+});
+</script>
+</body>
+</html>
