@@ -6,7 +6,8 @@ Launcher.install("cls", class extends ApplicationBase{
 });
 Launcher.install("echo", class extends ApplicationBase{
 	main(args){
-		this.stdout.write(new TextEncoder().encode(args.at(1) + "\n"));
+		const {data} = this.parseArgs(args, {data: "string[] %1*"});
+		this.stdout.write(new TextEncoder().encode(data.join(" ") + "\n"));
 		return 0;
 	}
 });
@@ -29,7 +30,19 @@ Launcher.install("set", class extends ApplicationBase{
 });
 Launcher.install("type", class extends ApplicationBase{
 	main(args){
-		return Array.fromAsync(args.slice(1).map(item => this.file.getResponse(item).then(res => res.arrayBuffer())))
+		const {stdin, files} = this.parseArgs(args, {
+			stdin: "bool stdin,-i",
+			files: "string[] file,-f,%1*"
+		});
+		if(stdin){
+			return this.stdin.getStream().then(stream => Array.fromAsync(stream)).then(data => {
+				return new Blob(data).arrayBuffer();
+			}).then(buffer => {
+				this.stdout.write(new Uint8Array(buffer));
+				return Promise.resolve(0);
+			});
+		}
+		return Array.fromAsync(files.map(item => this.file.getResponse(item).then(res => res.arrayBuffer())))
 		.then(buffers => {
 			const n = buffers.length;
 			for(let i = 0; i < n; i++){
@@ -47,16 +60,6 @@ Launcher.install("cd", class extends ApplicationBase{
 	main(args){
 		this.cd(args.at(1));
 		return 0;
-	}
-});
-Launcher.install("io", class extends ApplicationBase{
-	main(args){
-		return this.stdin.getStream().then(stream => Array.fromAsync(stream)).then(data => {
-			return new Blob(data).arrayBuffer();
-		}).then(buffer => {
-			this.stdout.write(new Uint8Array(buffer));
-			return Promise.resolve(0);
-		});
 	}
 });
 

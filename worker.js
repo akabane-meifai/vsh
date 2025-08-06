@@ -5,6 +5,132 @@ class ApplicationBase{
 	main(args){
 		return 1;
 	}
+	parseArgs(argv, spec){
+		const result = {};
+		const shortAliases = {};
+		const longAliases = {};
+		const types = {};
+		const positions = [];
+		const castMap = {
+			bool: "bool",
+			enum: "enum",
+			int(val){
+				return parseInt(val, 10);
+			},
+			float(val){
+				return parseFloat(val);
+			},
+			string(val){
+				return val;
+			}
+		};
+		const optionTypePattern = /^(bool|(int|float|string|enum)(\[\]|\*)?)\s+/;
+		const aliasePattern = /(?:^|,)((-?)([^\-%=][^,=]*)|%([0-9]+)(\*?))(?:=([0-9]+))?/g;
+		const longOptPattern = /^([^\-%=][^,=]*)(?:=(.*))?$/;
+
+		for(const [key, def] of Object.entries(spec)){
+			const matches1 = def.match(optionTypePattern);
+			if(!Array.isArray(matches1)){
+				continue;
+			}
+			const type = matches1.at(2) ?? matches1.at(1);
+			types[key] = castMap[type];
+			result[key] = (matches1.at(3) != null) ? [] : ((matches1.at(2) != null) ? null : false);
+			const matches2 = def.slice(matches1.at(0).length).matchAll(aliasePattern);
+			for(let match of matches2){
+				const token = match.at(3);
+				const enumVal = match.at(6);
+				if(match.at(2) == "-"){
+					shortAliases[token] = [key, enumVal];
+				}else if(token != null){
+					longAliases[token] = [key, enumVal];
+				}else{
+					positions.push({
+						key: key,
+						index: Number(match.at(4)),
+						seq: match.at(5) ?? null
+					});
+				}
+			}
+		}
+		positions.sort((a, b) => a.index - b.index);
+
+		const args = argv.slice(1);
+		const unused = [argv.at(0)];
+		let prevShort = null;
+		for(let arg of args){
+			if(prevShort != null){
+				const type = types[prevShort];
+				if(Array.isArray(result[prevShort])){
+					result[prevShort].push(type(arg));
+				}else{
+					result[prevShort] = type(arg);
+				}
+				prevShort = null;
+				continue;
+			}
+			if(arg.startsWith("--")){
+				const matches = arg.slice(2).match(longOptPattern);
+				if(Array.isArray(matches)){
+					const [aliases, enumVal] = longAliases[matches.at(1)];
+					if(aliases != null){
+						const type = types[aliases];
+						if(type == "bool"){
+							result[aliases] = true;
+						}else if(type == "enum"){
+							if(Array.isArray(result[aliases])){
+								result[aliases].push(Number(enumVal));
+							}else{
+								result[aliases] = Number(enumVal);
+							}
+						}else if(Array.isArray(result[aliases])){
+							result[aliases].push(type(matches.at(2)));
+						}else{
+							result[aliases] = type(matches.at(2));
+						}
+						continue;
+					}
+				}
+			}
+			if(arg.startsWith("-")){
+				const [aliases, enumVal] = shortAliases[arg.slice(1)];
+				if(aliases != null){
+					if(types[aliases] == "bool"){
+						result[aliases] = true;
+					}else if(type == "enum"){
+						if(Array.isArray(result[aliases])){
+							result[aliases].push(Number(enumVal));
+						}else{
+							result[aliases] = Number(enumVal);
+						}
+					}else{
+						prevShort = aliases;
+					}
+					continue;
+				}
+			}
+			unused.push(arg);
+		}
+
+		const n = unused.length;
+		const m = positions.length;
+		let pos = 0;
+		for(let i = 0, pos = 0; (i < n) && (pos < m); i++){
+			for(; positions[pos]?.index == i; pos++){
+				const {key, index, seq} = positions[pos];
+				const type = types[key];
+				if(!Array.isArray(result[key])){
+					result[key] = type(unused[i]);
+				}else if(seq == "*"){
+					const appends = Array.from(unused.slice(i), type);
+					result[key].push(...appends);
+				}else{
+					result[key].push(type(unused[i]));
+				}
+			}
+		}
+		return result;
+	}
 }
 class EnvironmentBase{
 	constructor(launcher){
