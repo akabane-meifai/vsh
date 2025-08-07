@@ -38,6 +38,12 @@
 #terminal .esc::before{
 	content: "^";
 }
+#terminal .bold{font-weight: bold;}
+#terminal .italic{font-style: italic;}
+#terminal .underline{text-decoration: underline;}
+#terminal .strike{text-decoration: line-through;}
+#terminal .underline.strike{text-decoration: underline line-through;}
+
 #terminal [data-tc="0"]{ color: var(--basic-color0); }
 #terminal [data-tc="1"]{ color: var(--basic-color1); }
 #terminal [data-tc="2"]{ color: var(--basic-color2); }
@@ -169,6 +175,42 @@ const process = {
 								if(esc == "0m"){
 									this.ctx.textColor = null;
 									this.ctx.backgroundColor = null;
+									this.ctx.bold = false;
+									this.ctx.italic = false;
+									this.ctx.underline = false;
+									this.ctx.strike = false;
+									continue;
+								}
+								if(esc == "1m"){
+									this.ctx.bold = true;
+									continue;
+								}
+								if(esc == "3m"){
+									this.ctx.italic = true;
+									continue;
+								}
+								if(esc == "4m"){
+									this.ctx.underline = true;
+									continue;
+								}
+								if(esc == "9m"){
+									this.ctx.strike = true;
+									continue;
+								}
+								if(esc == "22m"){
+									this.ctx.bold = false;
+									continue;
+								}
+								if(esc == "23m"){
+									this.ctx.italic = false;
+									continue;
+								}
+								if(esc == "24m"){
+									this.ctx.underline = false;
+									continue;
+								}
+								if(esc == "29m"){
+									this.ctx.strike = false;
 									continue;
 								}
 								if(esc == "7m"){
@@ -223,6 +265,22 @@ const process = {
 						if(this.ctx.backgroundColor != null){
 							plain = false;
 							span.setAttribute("data-b" + this.ctx.backgroundColor.attr, this.ctx.backgroundColor.value);
+						}
+						if(this.ctx.bold){
+							plain = false;
+							span.classList.add("bold");
+						}
+						if(this.ctx.italic){
+							plain = false;
+							span.classList.add("italic");
+						}
+						if(this.ctx.underline){
+							plain = false;
+							span.classList.add("underline");
+						}
+						if(this.ctx.strike){
+							plain = false;
+							span.classList.add("strike");
 						}
 						this.terminal.append(plain ? span.textContent : span);
 					}
@@ -322,7 +380,11 @@ const process = {
 	ctx: {
 		echo: true,
 		textColor: null,
-		backgroundColor: null
+		backgroundColor: null,
+		bold: false,
+		italic: false,
+		underline: false,
+		strike: false
 	},
 	cd: "/",
 	environments: {},
